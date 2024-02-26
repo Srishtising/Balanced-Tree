@@ -1,0 +1,108 @@
+
+  
+  
+--1 What was the total quantity sold for all products?
+select sum(qty) Tot_qty_sold from balanced_tree.sales; 
+
+--2 What is the total generated revenue for all products before discounts?
+--revenue = qty*price
+select sum(qty*price) as Tot_Revenye from balanced_tree.sales;
+
+--3 What was the total discount amount for all products?
+select sum(discount) as Tot_discount from balanced_tree.sales;
+
+--4 How many unique transactions were there?
+select count(distinct txn_id) as tot_txn from balanced_tree.sales;
+
+--5 
+with prods as (
+select distinct txn_id,count(prod_id)over(partition by txn_id) as prod
+from balanced_tree.sales)
+select sum(prod)/count(txn_id) as avg_unique_prods
+from prods
+  
+--6 What are the 25th, 50th and 75th percentile values for the revenue per transaction?
+select 
+percentile_cont(0.25)within group(order by ((qty*price)*(1-discount*0.01))) as percentile_25,
+percentile_cont(0.5)within group(order by ((qty*price)*(1-discount*0.01))) as percentile_50,
+percentile_cont(0.75)within group(order by ((qty*price)*(1-discount*0.01))) as percentile_75
+from balanced_tree.sales;
+
+--7 What is the percentage split of all transactions for members vs non-members?
+select count(case when member='t' then 1 else null end)*100.0/count(*) as member_per,
+count(case when member='f' then 1 else null end)*100.0/count(*) as non_mem_per
+from balanced_tree.sales;
+  
+--8 What is the average revenue for member transactions and non-member transactions?
+select avg(case when member='t' then (qty*price)*(1-discount*0.01) end) as member_per,
+avg(case when member='f' then (qty*price)*(1-discount*0.01) end) as non_mem_per
+from balanced_tree.sales;
+
+
+--9 What are the top 3 products by total revenue before discount?
+select pd.product_name, sum(s.qty*s.price)*(1-discount*0.01) as revenue
+from balanced_tree.sales as s join balanced_tree.product_details as pd
+on s.prod_id=pd.product_id
+group by pd.product_name, s.discount
+order by 2 desc
+limit 3;
+
+--10 What is the total quantity, revenue and discount for each segment?
+select pd.segment_name,sum(s.qty) as tot_qty, round(sum((qty*s.price)*(1-discount*0.01)),2) as total_revenue,
+round(sum(discount*qty*s.price/100.0),2) as total_disc
+from balanced_tree.sales as s join balanced_tree.product_details as pd
+on s.prod_id=pd.product_id
+group by pd.segment_name
+
+
+--11 What is the top selling product for each segment?
+with ct1 as(
+select pd.segment_name,pd.product_name, sum(s.qty) as total_prd,
+rank() over(partition by segment_name order by sum(s.qty) desc) as rn from balanced_tree.product_details as pd join balanced_tree.sales as s
+on s.prod_id=pd.product_id
+group by segment_name, product_name
+order by segment_name
+)
+select segment_name, product_name, total_prd from ct1 where rn=1
+
+--12 What is the percentage split of revenue by product for each segment?
+with ct1 as(
+select pd.segment_name,pd.product_name, round(sum((qty*s.price)*(1-discount*0.01)),2) as total_revenue from balanced_tree.product_details as pd join balanced_tree.sales as s
+on s.prod_id=pd.product_id
+group by segment_name, product_name
+order by segment_name
+ )
+ select segment_name, product_name, round(total_revenue*100.0/(select sum((qty*price)*(1-discount*0.01)) from balanced_tree.sales),2) as per
+ from ct1;
+ 
+ --13 What is the percentage split of total revenue by category?
+ select category_name,
+round(sum((qty*s.price)*(1-discount*0.01)) *100.0/ (select sum((qty*price)*(1-discount*0.01)) from balanced_tree.sales),2) 
+as rev_cat_prcnt
+from balanced_tree.sales s
+join balanced_tree.product_details pd on s.prod_id = pd.product_id
+group by category_name;
+
+--14 What is the most common combination of at least 1 quantity of any 3 products in a 1 single transaction?
+SELECT s.prod_id, t1.prod_id, t2.prod_id, COUNT(*) AS combination_cnt       
+FROM balanced_tree.sales s
+JOIN balanced_tree.sales t1 ON t1.txn_id = s.txn_id 
+AND s.prod_id < t1.prod_id
+JOIN balanced_tree.sales t2 ON t2.txn_id = s.txn_id
+AND t1.prod_id < t2.prod_id
+GROUP BY 1, 2, 3
+ORDER BY 4 DESC
+LIMIT 1;
+
+--15 What is the total transaction “penetration” for each product? 
+--(hint: penetration = number of transactions where at least 1 quantity of 
+--a product was purchased divided by total number of transactions)
+select s.prod_id,pd.product_name, (count(s.txn_id)::numeric/(select count(distinct txn_id) from balanced_tree.sales)) from balanced_tree.sales as s
+join balanced_tree.product_details as pd on s.prod_id=pd.product_id
+group by prod_id,pd.product_name
+order by 1;
+
+--16 What is the percentage split of revenue by segment for each category?
+select pd.segment_name, pd.category_name,sum(s.qty*s.price)*100.0/(select sum(qty*price) from balanced_tree.sales) from balanced_tree.product_details as pd join balanced_tree.sales as s
+on pd.product_id=s.prod_id
+group by  pd.segment_name, pd.category_name;
